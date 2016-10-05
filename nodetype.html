@@ -1,0 +1,25 @@
+
+<!DOCTYPE HTML>
+<html lang="zh/en">
+<head>
+    <meta charset="UTF-8">
+    <title>nodeType</title>
+</head>
+<body>
+    <div id="container">这是一个元素节点</div>
+
+ -+.+
+    <!-- script脚本 -->
+    <script type="text/javascript">
+        var divNode = document.getElementById("container");
+        alert(divNode.innerHTML);/*显示成功*/
+
+        if(divNode.nodeType == Node.ELEMENT_NODE){
+            alert("Node is a element!");/*不能显示，不管是数字值类型还是字符串类型都不能显示。调整script的位置也不行。试了firefox，chrome，IE，都不行，这是为什么？？*/
+        }
+        if(divNode.nodeType == 1){
+            alert("this is a element");
+        }
+    </script>
+</body>
+</html>
