@@ -2,7 +2,7 @@
  * 羊左.js
  * @yzDoc
  * 作者:刘瑶
- * 核心功能:任务序列,promise,数据缓存,请求归并,依赖注入,模板管理
+ * 核心功能:任务序列,promise,数据缓存,请求归并,依赖注入,模板管理,事件总线
  */
 (function (window, document, undefined) {
     'use strict';
@@ -14,9 +14,10 @@
     var NODE_TYPE_ELEMENT = 1;
 
     var isArray = Array.isArray;
-    var slice = Array.slice;
+    var slice = [].slice;
+
     var toString = Object.prototype.toString;
-    var Zepto = !!window.Zepto? window.Zepto:window.$;
+    var Zepto = !!window["Zepto"]? window["Zepto"]:window["$"];
     if(!Zepto) throw "羊左.js需要依赖Zepto或者jQuery";
 
     function minErr(error) {
@@ -25,13 +26,16 @@
     }
 
     var element = Zepto;
+    /**
+     * @param {string} string String to be converted to lowercase.
+     * @returns {string} Lowercased string.
+     */
     var lowercase = function(string) {return isString(string) ? string.toLowerCase() : string;};
-    var hasOwnProperty = Object.prototype.hasOwnProperty;
+    /**
+     * @param {string} string String to be converted to uppercase.
+     * @returns {string} Uppercased string.
+     */
     var uppercase = function(string) {return isString(string) ? string.toUpperCase() : string;};
-
-    var trim = function (value) {
-        return isString(value) ? value.trim() : value;
-    };
 
     function isString(value) {
         return typeof value === 'string';
@@ -62,6 +66,8 @@
     }
 
     function isUndefined(value) {return typeof value === 'undefined';}
+
+    function isDefined(value) {return typeof value !== 'undefined';}
 
     /**
      * 是否为函数
@@ -101,32 +107,13 @@
         return array1.concat(slice.call(array2, index));
     }
 
-    function sortedKeys(obj) {
-        return Object.keys(obj).sort();
-    }
-
-    function forEachSorted(obj, iterator, context) {
-        var keys = sortedKeys(obj);
-        for (var i = 0; i < keys.length; i++) {
-            iterator.call(context, obj[keys[i]], keys[i]);
-        }
-        return keys;
-    }
-
-    function encodeUriQuery(val, pctEncodeSpaces) {
-        return encodeURIComponent(val).
-        replace(/%40/gi, '@').
-        replace(/%3A/gi, ':').
-        replace(/%24/g, '$').
-        replace(/%2C/gi, ',').
-        replace(/%3B/gi, ';').
-        replace(/%20/g, (pctEncodeSpaces ? '%20' : '+'));
-    }
-
     /**
      * 迭代 ： 可对数组和对象进行迭代
      * @yzdoc function
-     * @name yangzuo.forEach
+     * @param {Object|Array} obj Object to iterate over.
+     * @param {Function} iterator Iterator function.
+     * @param {Object=} context Object to become context (`this`) for the iterator function.
+     * @returns {Object|Array} Reference to `obj`.
      */
     function forEach(obj, iterator, context) {
         var key, length;
@@ -198,7 +185,7 @@
         if (o1 === o2) return true;
         if (o1 === null || o2 === null) return false;
         if (o1 !== o1 && o2 !== o2) return true; // NaN === NaN
-        var t1 = typeof o1, t2 = typeof o2, length, key, keySet;
+        var t1 = typeof o1, t2 = typeof o2, length, key;
         if (t1 == t2) {
             if (t1 == 'object') {
                 if (isArray(o1)) {
@@ -216,7 +203,7 @@
                     return o1.toString() == o2.toString();
                 } else {
                     if (isWindow(o1) || isWindow(o2) || isArray(o2)) return false;
-                    keySet = {};
+                    var keySet = {};
                     for (key in o1) {
                         if (key.charAt(0) === '$' || isFunction(o1[key])) continue;
                         if (!equals(o1[key], o2[key])) return false;
@@ -298,7 +285,6 @@
         return isString(json) ? JSON.parse(json) : json;
     }
 
-
     /**
      * 依赖注入服务
      */
@@ -331,10 +317,9 @@
         }
         forEach($inject,function (item) {
             if(!isString(item)) minErr("$inject中的注解必须为字符串");
-        })
+        });
         return $inject;
     }
-
 
     function createInternalInjector(cache, factory) {
 
@@ -368,19 +353,18 @@
                 key = $inject[i];
                 args.push(getService(key));
             }
-            if(!!params) args.push(params);
+            if(isArray(params)){
+                forEach(params,function (param) {
+                    args.push(param);
+                })
+            }else{
+                args.push(params);
+            }
             return fn.apply(self, args);
-        }
-
-        function instantiate(Type) {
-            var instance = Object.create(factory.prototype);
-            var returnedValue = invoke(factory, instance);
-            return isObject(returnedValue) || isFunction(returnedValue) ? returnedValue : instance;
         }
 
         return {
             invoke: invoke,
-            instantiate: instantiate,
             get: getService,
             annotate: annotate,
             has: function(name) {
@@ -388,14 +372,12 @@
             }
         };
     }
-    
-    
+
     /**
      * 注入式调用
      * @name yangzuo.injectExecute
      * @param fn
      * @param params 业务参数
-     * @param serviceList 服务列表 如果fn.$inject 存在,就会忽略这个值
      * @param obj this指向
      * fn.$inject = ["service1","service2"]
      * fn(service1,service2,params)
@@ -416,16 +398,66 @@
      */
     function service(serviceName,factory){
         if(!isString(serviceName)) throw "服务名必须为字符串";
+        if(!factory) throw "服务工厂不能为空";
         if(instanceInjector.has(serviceName)) throw serviceName+"重复注册";
         factoryCache[serviceName] = factory;
     }
+
+    service("$browser",$BrowserService);
+    $BrowserService.$inject = [];
+    function $BrowserService(){
+        var self = this,
+            setTimeout = window.setTimeout,
+            clearTimeout = window.clearTimeout,
+            pendingDeferIds = {};
+
+        self.isMock = false;
+
+        var outstandingRequestCount = 0;
+        var outstandingRequestCallbacks = [];
+
+        function completeOutstandingRequest(fn) {
+            try {
+                fn.apply(null, sliceArgs(arguments, 1));
+            } finally {
+                outstandingRequestCount--;
+                if (outstandingRequestCount === 0) {
+                    while (outstandingRequestCallbacks.length) {
+                        outstandingRequestCallbacks.pop()();
+                    }
+                }
+            }
+        }
+
+        self.defer = function(fn, delay) {
+            var timeoutId;
+            outstandingRequestCount++;
+            timeoutId = setTimeout(function() {
+                delete pendingDeferIds[timeoutId];
+                completeOutstandingRequest(fn);
+            }, delay || 0);
+            pendingDeferIds[timeoutId] = true;
+            return timeoutId;
+        };
+
+        self.defer.cancel = function(deferId) {
+            if (pendingDeferIds[deferId]) {
+                delete pendingDeferIds[deferId];
+                clearTimeout(deferId);
+                completeOutstandingRequest(noop);
+                return true;
+            }
+            return false;
+        };
+    }
+
 
     /**
      * promise 服务
      */
     service("$q",$qFactory);
-    $qFactory.$inject = [];
-    function $qFactory(){
+    $qFactory.$inject = ["$browser"];
+    function $qFactory($browser){
         function callOnce(self, resolveFn, rejectFn) {
             var called = false;
 
@@ -571,7 +603,7 @@
         function scheduleProcessQueue(state) {
             if (state.processScheduled || !state.pending) return;
             state.processScheduled = true;
-            setTimeout(function(){processQueue(state);})
+            $browser.defer(function(){processQueue(state);})
         }
 
         function processQueue(state) {
@@ -598,7 +630,6 @@
         }
 
         var $Q = function Q(){};
-
         $Q.defer = defer;
         $Q.reject = reject;
         $Q.when = when;
@@ -606,6 +637,87 @@
         return $Q;
     }
 
+    service("$Timeout",$Timeout);
+    $Timeout.$inject = ["$browser","$q"];
+    function $Timeout($browser,$q){
+        var deferreds = {};
+
+        function timeout(fn, delay) {
+            var deferred = $q.defer(),
+                promise = deferred.promise,
+                timeoutId;
+
+            timeoutId = $browser.defer(function() {
+                try {
+                    deferred.resolve(fn());
+                } catch (e) {
+                    deferred.reject(e);
+                }finally {
+                    delete deferreds[promise.$$timeoutId];
+                }
+            }, delay);
+
+            promise.$$timeoutId = timeoutId;
+            deferreds[timeoutId] = deferred;
+
+            return promise;
+        }
+
+        timeout.cancel = function(promise) {
+            if (promise && promise.$$timeoutId in deferreds) {
+                deferreds[promise.$$timeoutId].reject('canceled');
+                delete deferreds[promise.$$timeoutId];
+                return $browser.defer.cancel(promise.$$timeoutId);
+            }
+            return false;
+        };
+
+        return timeout;
+    }
+
+    service("$Interval",$Interval);
+    $Interval.$inject = ["$q"];
+    function $Interval($q){
+        var intervals = {};
+
+        function interval(fn, delay, count) {
+            var setInterval = window.setInterval,
+                clearInterval = window.clearInterval,
+                iteration = 0,
+                deferred = $q.defer(),
+                promise = deferred.promise;
+
+            count = isDefined(count) ? count : 0;
+
+            promise.then(null, null, fn);
+
+            promise.$$intervalId = setInterval(function tick() {
+                deferred.notify(iteration++);
+                if (count > 0 && iteration >= count) {
+                    deferred.resolve(iteration);
+                    clearInterval(promise.$$intervalId);
+                    delete intervals[promise.$$intervalId];
+                }
+
+            }, delay);
+
+            intervals[promise.$$intervalId] = deferred;
+
+            return promise;
+        }
+
+        interval.cancel = function(promise) {
+            if (promise && promise.$$intervalId in intervals) {
+                intervals[promise.$$intervalId].reject('canceled');
+                window.clearInterval(promise.$$intervalId);
+                delete intervals[promise.$$intervalId];
+                return true;
+            }
+            return false;
+        };
+
+        return interval;
+    }
 
 
     /**
@@ -630,7 +742,8 @@
     }
 
     function $Cache(cacheId,caches){
-        this.state = {size:0,cacheId:cacheId}, this.data = {};
+        this.state = {size:0,cacheId:cacheId};
+        this.data = {};
         this.caches = caches;
     }
 
@@ -667,22 +780,22 @@
         has:function(key){
             return (key in this.data);
         }
-    }
+    };
 
 
     /**
      * http服务
      * @type {string[]}
      */
-    service("$http",$http)
-    $http.$inject = ["$q"]
+    service("$http",$http);
+    $http.$inject = ["$q"];
     function $http($q){
         this.$q = $q;
     }
     $http.prototype = {
         get:function(url,params){
             var deferred = this.$q.defer();
-            Zepto.ajax({
+            Zepto["ajax"]({
                 type:'GET',
                 url:url,
                 data:params,
@@ -697,7 +810,7 @@
         },
         post:function (url, data) {
             var deferred = this.$q.defer();
-            Zepto.ajax({
+            Zepto["ajax"]({
                 type:'POST',
                 url:url,
                 data:data,
@@ -712,7 +825,7 @@
         },
         jsonp:function (url,data) {
             var deferred = this.$q.defer();
-            Zepto.ajax({
+            Zepto["ajax"]({
                 type:"GET",
                 url:url,
                 data:data,
@@ -726,88 +839,93 @@
             });
             return deferred.promise;
         }
-    }
+    };
 
     //模板缓存服务
     service("$templateCache",$templateCache);
-    $templateCache.$inject = ["$cacheFactory"]
+    $templateCache.$inject = ["$cacheFactory"];
     function $templateCache($cacheFactory){
         this.templateCache = $cacheFactory.getCache("$$templateCache");
+        this.compile();//收罗页面的模板
     }
 
     $templateCache.prototype = {
-        get:function(url){
-            if(this.templateCache.has(url)){
-                return this.templateCache.get(url);
+        get:function(tid){
+            if(this.templateCache.has(tid)){
+                return this.templateCache.get(tid);
             }else{
-                minErr("模板:"+url+" 加载失败");
+                minErr("模板:"+tid+" 加载失败");
             }
         },
         removeAll: function() {
             this.templateCache.removeAll();
         },
-        remove: function(url) {
-            this.templateCache.remove(url);
+        remove: function(tid) {
+            this.templateCache.remove(tid);
         },
-        has:function(url){
-            this.templateCache.has(url);
+        has:function(tid){
+            return this.templateCache.has(tid);
         },
         put:function(tid,html){
             this.templateCache.put(tid,html);
         },
-        compile:function(){
+        compile:function(){//当只有一个模板的时候会不会出问题
             var templates = element("script[type='text/html']");
             if(isArrayLike(templates)){
                 forEach(templates,function(dom){
                     var $dom = element(dom);
-                    var templateUrl = $dom.attr("id");
+                    var tid = $dom.attr("id");
+                    if(!tid) return;
                     var html = $dom.html();
-                    this.put(templateUrl,html);
+                    this.put(tid,html);
                 },this);
             }
             templates.remove();
         }
-    }
+    };
 
     service("$templateRequest",$templateRequest);
-    $templateRequest.$inject = ["$templateCache","$q","$cacheFactory","$http"]
+    $templateRequest.$inject = ["$templateCache","$q","$cacheFactory","$http"];
     function $templateRequest($templateCache,$q,$cacheFactory,$http){
         var templateHttpResultCache = $cacheFactory.getCache("$$templateHttpResultCache");
 
-        function loadTemplate(url,tid){
+        function getTemplateForTemplateCache(url,tid){
+            if(!!tid && !$templateCache.has(tid)) throw tid+"对应的模板为空";
+            if(!!tid) return $templateCache.get(tid);
 
             if($templateCache.has(url)){
-                var html = !isUndefined(tid)?$templateCache.get(tid):$templateCache.get(url)
-                return $q.when(url)
+                return $templateCache.get(url);
             }else{
-                var tpromise = $q.defer();
-                if(templateHttpResultCache.has(url)){
-                    templateHttpResultCache.get(url).then(function(){
-                        var html = !isUndefined(tid)?$templateCache.get(tid):$templateCache.get(url)
-                        tpromise.resolve(html);
-                    },function (e) {
-                        tpromise.reject(e)
-                    });
-                }else{
-                    templateHttpResultCache.put(url,tpromise.promise);
-                    $http.get(url).then(function(template){
-                        $templateCache.put(url,template)
-                        element("body").append('<div id="Template_Box" style="display: none;"></div>');
-                        element("#Template_Box").html(template);
-                        $templateCache.compile();
-                        element("#Template_Box").remove();
-
-                        var html = !isUndefined(tid)?$templateCache.get(tid):$templateCache.get(url)
-
-                        tpromise.resolve(html);
-                    },function (e) {
-                        tpromise.reject(e)
-                    });
-                }
-                return tpromise.promise;
+                throw url+"对应的模板为空";
             }
         }
 
+        function loadTemplate(url,tid){
+            if($templateCache.has(url) || !!tid && $templateCache.has(tid)){
+                return $q.when(getTemplateForTemplateCache(url,tid));
+            }
+            var tpromise = $q.defer();
+            if(templateHttpResultCache.has(url)){
+                templateHttpResultCache.get(url).then(function () {
+                    tpromise.resolve(getTemplateForTemplateCache(url,tid));
+                },function(e){
+                    tpromise.reject(e)
+                })
+            }else{
+                templateHttpResultCache.put(url,tpromise.promise);
+                $http.get(url).then(function(template){
+                    $templateCache.put(url,template);
+                    element("body").append('<div id="Template_Box" style="display: none;"></div>');
+                    element("#Template_Box").html(template);
+                    $templateCache.compile();
+                    element("#Template_Box").remove();
+                    tpromise.resolve(getTemplateForTemplateCache(url,tid));
+                },function (e) {
+                    tpromise.reject(e);
+                });
+            }
+            return tpromise.promise;
+        }
         return {
             loadTemplate:loadTemplate
         };
@@ -816,14 +934,15 @@
 
     //请求归并
     service("$httpBatchRequest",$httpBatchRequest);
-    $httpBatchRequest.$inject = ["$q","$templateRequest","$http","$templateCache","$cacheFactory"]
-    function $httpBatchRequest($q,$templateRequest,$http,$templateCache,$cacheFactory){
+    $httpBatchRequest.$inject = ["$q","$templateRequest","$http","$cacheFactory"];
+    function $httpBatchRequest($q,$templateRequest,$http,$cacheFactory){
         var dataSourceMap = $cacheFactory.getCache("$$dataSourceMap");
         var typeList = ["GET","POST","JSONP"];
 
         /**
          * 注册数据源
          * {url:请求地址,type:"GET","POST","JSONP_GET","JSONP_POST"}
+         * @param sourceName
          * @param config
          */
         function regestSource(sourceName,config){
@@ -834,8 +953,7 @@
         }
 
         function createBatchRequest() {
-            var batchRequest = new $$batchRequest();
-            return batchRequest;
+            return new $$batchRequest();
         }
 
         function hasSource(sourceName){
@@ -849,10 +967,7 @@
         };
 
         function $$batchRequest(){
-            var dataList = [];
-            var resultSize = 0;
             var sourceList = [];
-
 
             function getData(sourceName, params){
                 if(dataSourceMap.has(sourceName)){
@@ -860,34 +975,20 @@
                 }else{
                     minErr("数据源"+sourceName+"不存在");
                 }
-                dataList.push({});
                 return this;
             }
 
             function getTemplate(url,tid){
                 sourceList.push({type:"templateSource",url:url,tid:tid});
-                dataList.push({});
                 return this;
             }
 
             function done(){
-                var deferred = $q.defer();
-                forEach(sourceList,function(source,index){
-                    executeDataSource(source).then(function(data){
-                        if(isObject(data)){
-                            extend(dataList[index],data);
-                        } else{
-                            dataList[index] = data;
-                        }
-                        resultSize++;
-                        if(resultSize==dataList.length){
-                            deferred.resolve(dataList)
-                        }
-                    },function(e){
-                        deferred.reject(e);
-                    })
-                })
-                return deferred.promise;
+                var promiseList = [];
+                forEach(sourceList,function(source){
+                    promiseList.push(executeDataSource(source));
+                });
+                return $q.all(promiseList);
             }
 
             function executeDataSource(source){
@@ -901,17 +1002,13 @@
                         return $http.jsonp(dataSource.url,source.params);
                     }
                 }else if(source.type=="templateSource"){
-                    if($templateCache.has(source.tid)){
-                        return $q.when($templateCache.get(source.tid));
-                    }else{
-                        var deferred = $q.defer();
-                        $templateRequest.loadTemplate(source.url,source.tid).then(function(html){
-                            deferred.resolve(html);
-                        },function(e){
-                            deferred.reject(e);
-                        })
-                        return deferred.promise;
-                    }
+                    var deferred = $q.defer();
+                    $templateRequest.loadTemplate(source.url,source.tid).then(function(html){
+                        deferred.resolve(html);
+                    },function(e){
+                        deferred.reject(e);
+                    });
+                    return deferred.promise;
                 }
             }
             return {
@@ -925,62 +1022,63 @@
 
     /**
      * 任务队列
-     * 设计模式:责任链
      */
     service("$taskQueue",$taskQueue);
-    $taskQueue.$inject=["$injector"]
-    function $taskQueue($injector){
-        var teskMap = createMap();
+    $taskQueue.$inject=["$cacheFactory"];
+    function $taskQueue($cacheFactory){
+        var teskCache = $cacheFactory.getCache("$$taskFnMap");
 
         function registTask(teskId,teskFn){
-            teskMap[teskId] = teskFn;
+            if(teskCache.has(teskId)){
+                throw "任务"+teskId+"已经存在";
+            }
+            teskCache.put(teskId,teskFn);
         }
         /**
          * @yzDoc yangzuo.executeTaskQueue
-         * [{teskId:任务Id,resolve:fn,beforeFn:fn,afterFn:fn},...]
+         * [{teskId: 任务Id,resolve:fn,beforeFn:fn,afterFn:fn},...]
          * fn 是给 注册的任务注入参数用的,比如 有任务为teskFn(p1,p2,p3),那么 fn 返回result[]
-         * @param teskList
+         * @param {Array} teskList
+         * @param {Function} beforeFn 队列前置函数.
+         * @param {Function} afterFn 队列后置函数.
          */
-        function executeTaskQueue(teskList,beforeFn,afterFn){
+        function createTaskQueue(teskList){
             if(!isArray(teskList)) minErr("队列参数必须为数组");
             var queue = new $$taskQueue();
-            forEach(teskList,function(task,index){
-                !("id" in task) && minErr("任务队列中的对象必须存在Id");
-                !teskMap[task.id] && minErr("任务:"+task.id+"没有注册");
-                if(!!task.resolve && !isFunction(task.resolve)) minErr("队列参数的resolve必须为行数");
-                queue.push(new $$task(teskMap[task.id],task.resolve,task.params));
+            forEach(teskList,function(taskParams,index){
+                if(!("id" in taskParams)) throw "任务队列中的对象必须存在Id";
+                if(!teskCache.has(taskParams.id)) throw "任务:"+taskParams.id+"没有注册";
+                var task = new $$task(teskCache.get(taskParams.id),queue,index);
+                if(!!taskParams.resolve) task.setResolve(taskParams.resolve,taskParams.params);
+                queue.pushTask(task);
             });
-            !!beforeFn && queue.before(beforeFn);
-            !!afterFn && queue.after(afterFn);
-            queue.run();
+            return queue;
         }
 
         return {
             registTask:registTask,
-            executeTaskQueue:executeTaskQueue
+            createTaskQueue:createTaskQueue
         }
     }
 
     function $$taskQueue(){
-        this.size = 0;
         this.taskList = [];
-        this.beforeFn = noop;
-        this.afterFn = noop;
+        this.currIndex = 0;
+        this.prepareMap = createMap();
+        this.beforeFn = null;
+        this.afterFn = null;
+        this.notifyFn = null;
     }
     $$taskQueue.prototype = {
         run:function(){
-            injectExecute(this.beforeFn);
-            this.size>0 && this.taskList[0].run();
+            if(!!this.beforeFn && isFunction(this.beforeFn)) injectExecute(this.beforeFn);
+            this.taskList.length>0 && this.taskList[0].call();
         },
-        push:function (task) {
+        pushTask:function (task) {
             if(!(task instanceof $$task)){
                 return;
             }
-            this.size == 0 && task.setHead();
-            this.size != 0 && this.taskList[this.size-1].setNext(task);
-            task.$setQueue(this);
             this.taskList.push(task);
-            this.size++;
         },
         before:function (fn) {
             if(!isFunction(fn)) minErr("队列前置函数类型异常");
@@ -989,81 +1087,79 @@
         after:function(fn){
             if(!isFunction(fn)) minErr("队列后置函数类型异常");
             this.afterFn = fn;
-        }
-    }
-
-    function $$task(teskFn,resolve,params){
-        this.nextItem = null;
-        this.isThis = false
-        this.dataList = [];
-        this.isError = false;
-        this.teskFn = teskFn;
-
-        if(!!resolve){
-            var promiss = injectExecute(resolve,params);
-            if(!isPromiseLike(promiss)){
-                minErr("队列的resolve必须返回promiss对象")
+        },
+        notify:function(fn){
+            if(!isFunction(fn)) minErr("任务监听函数类型异常");
+            this.notifyFn = fn;
+        },
+        call:function(index){//当任务内部进入就绪状态时,告知队列可以调用
+            this.prepareMap[index] = true;//标记该任务为就绪状态
+            if(index!==this.currIndex){
+                return;
             }
-            var _this = this;
-            promiss.then(function(resultList){
-                !isArray(resultList) && minErr("队列resolve的结果必须为数组");
-                if(resultList.length == 0){
-                    _this.dataList.push(true);
-                }else{
-                    _this.dataList = [].concat(resultList);
+            if(!(index in this.prepareMap)){
+                return;
+            }
+            this.taskList[index].run();
+        },
+        callNext:function () {
+            if(!!this.notifyFn && isFunction(this.notifyFn)){
+                injectExecute(this.notifyFn,this.currIndex);
+            }
+            this.currIndex++;
+            if(this.currIndex>=this.taskList.length){
+                if(!!this.afterFn && isFunction(this.afterFn)){
+                    injectExecute(this.afterFn);
                 }
-                _this.isThis && _this.run();
-            },function(e){
-                _this.dataList.push(false);
-                _this.isError = true;
-                _this.isThis && _this.run();
-            })
-        }else{
-            this.dataList.push(true);
+                return;
+            }
+            this.taskList[this.currIndex].call();
         }
+    };
+
+    function $$task(teskFn,$taskQueue,index){
+        this.teskFn = teskFn;
+        this.$taskQueue = $taskQueue;
+        this.index = index;
+
+        if(!isFunction(teskFn)) throw "任务的teskFn必须为函数";
+        this.prs = null;
+        this.data = null;
+        this.error = false;
     }
 
     $$task.prototype = {
-        setNext:function(next){
-            if(next instanceof $$task){
-                this.nextItem = next;
-            }else{
-                minErr("队列中的个体必须为$$task类型");
+        setResolve:function(resolve,params){//执行数据准备
+            this.prs = injectExecute(resolve,params);
+            if(!isPromiseLike(this.prs)) throw "队列的resolve必须返回promiss对象";
+            var _this = this;
+            this.prs.then(function(result){
+                _this.data = result;
+                _this.$taskQueue.call(_this.index);//数据加载完成,告诉队列进行任务调用
+            },function(e){
+                console.log(e);
+                _this.error = true;
+                _this.data = [];
+                _this.$taskQueue.call(_this.index);//当出现异常,放弃当前的任务,直接执行下一个任务
+            });
+        },
+        call:function(){//队列发起重新调用指令
+            if(!!this.prs && !this.data){//当数据未准备完成时,暂停当前的调用
+                return;
             }
-            return this;
-        },
-        setHead:function(){
-            this.isThis = true;
-            return this;
-        },
-        $setQueue:function (queue) {
-            this.queue = queue;
+            this.$taskQueue.call(this.index);
         },
         run:function(){
-            this.isThis = true;
-            if(this.dataList.length == 0) return;
-            if(!this.isError){
+            if(!this.error){
                 try{
-                    this.teskFn.apply(null,this.dataList);
+                    injectExecute(this.teskFn,this.data,this.teskFn);
                 }catch(e){
-                    console.log(e);//有异常时,忽略当前节点任务,只做提示
-                    this.next();
-                    return this;
+                    console.log(e);
                 }
             }
-            this.next();
-            return this;
-        },
-        next:function(){
-            this.isThis = false;
-            if(!!this.nextItem){
-                this.nextItem.run();
-            }else{
-                this.queue && this.queue.afterFn && injectExecute(this.queue.afterFn,undefined,this.queue);
-            }
-            return this;
+            this.$taskQueue.callNext();//当任务执行完成之后,通知队列调用下一个任务
         }
-    }
+    };
 
     var taskQueue = instanceInjector.get("$taskQueue");
 
@@ -1071,36 +1167,42 @@
      * 事件总线,用于封闭代码之间的通信
      */
     service("$eventBus",$eventBus);
-    $eventBus.$inject=["$cacheFactory"];
-    function $eventBus($cacheFactory){
-        this.cache = $cacheFactory.getCache("$$eventBus");
-    }
-    $eventBus.prototype = {
-        on:function(eventName,callback,isSingle){
+    $eventBus.$inject=["$cacheFactory","$q"];
+    function $eventBus($cacheFactory,$q){
+        var cache = $cacheFactory.getCache("$$eventMap");
+        var singleEventName = {};
+
+        function on(eventName,callback,isSingle){
             if(!isString(eventName)) throw "事件名称必须为字符串";
             if(!isFunction(callback)) throw "callback必须为函数";
-            if(isSingle || !this.cache.has(eventName)){
-                this.cache.put(eventName,[callback]);
-            }else{
-                this.cache.get(eventName).push(callback);
+            if(eventName in singleEventName) throw "事件"+eventName+"为单一监听事件,不能重复监听";
+            if(isSingle){
+                singleEventName[eventName] = true;
             }
-        },
-        singleOn:function(eventName,callback){
-            this.cache.put(eventName,callback,true);
-        },
-        post:function(eventName,event,obj){
-            if(!this.cache.has(eventName)) return;
-            forEach(this.cache.get(eventName),function(callback){
-                try{
-                    injectExecute(callback,event,this);
-                }catch(e){
-                    console.log(e);
-                }
-            },obj);
+            if(!cache.has(eventName)){
+                cache.put(eventName,$q.defer());
+            }
+            cache.get(eventName).promise.then(noop,noop,function(event){
+                injectExecute(callback,event);
+            });
+        }
+
+        function singleOn(eventName,callback){
+            on(eventName,callback,true);
+        }
+
+        function post(eventName, event) {
+            if(!cache.has(eventName)) return;
+            cache.get(eventName).notify(event);
+        }
+
+        return {
+            on:on,
+            singleOn:singleOn,
+            post:post
         }
     }
     var eventBus = instanceInjector.get("$eventBus");
-
     /**
      * 在这里你可以看到yangzuo所有的工具API
      * @param yangzuo
@@ -1131,7 +1233,7 @@
             'on':bind(eventBus,eventBus.on),
             'singleOn':bind(eventBus,eventBus.singleOn),
             'registTask':bind(taskQueue,taskQueue.registTask),
-            'executeTaskQueue':bind(taskQueue,taskQueue.executeTaskQueue)
+            'createTaskQueue':bind(taskQueue,taskQueue.createTaskQueue)
         });
     }
 
