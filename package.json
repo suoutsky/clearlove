@@ -1,0 +1,22 @@
+{
+  "name": "clearlove",
+  "version": "1.0.0",
+  "description": "js fe basis",
+  "main": "Object.keys.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/suoutsky/clearlove.git"
+  },
+  "keywords": [
+    "basis"
+  ],
+  "author": "nemo",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/suoutsky/clearlove/issues"
+  },
+  "homepage": "https://github.com/suoutsky/clearlove#readme"
+}
