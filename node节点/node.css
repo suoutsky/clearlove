@@ -1,0 +1,34 @@
+.father {
+ display: flex;
+ border: 1px solid #f76559;
+ width: 800px;
+ padding: 40px;
+ justify-content: space-between;
+}
+.a {
+    flex: 1;
+    background-image:linear-gradient(-269deg, #fcc41a 0%, #ff9e43 99%);
+    border-radius:8px;
+    width:210px;
+    height:137px;
+    line-height: 137px;
+    text-align: center;
+}
+.b {
+    flex: 1;
+    background-image:linear-gradient(-90deg, #f76559 0%, #ff9f6c 100%);
+    border-radius:8px;
+    width:210px;
+    height:137px;
+    line-height: 137px;
+    text-align: center;
+}
+.c {
+    flex: 1;
+    background-image:linear-gradient(-90deg, #5456ff 0%, #bb6fff 100%);
+    border-radius:8px;
+    width:210px;
+    height:137px;
+    line-height: 137px;
+    text-align: center;
+}
