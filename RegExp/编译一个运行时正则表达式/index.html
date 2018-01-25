@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>Document</title>
+</head>
+<body>
+  <div class="samurai ninja"></div>
+  <div class="ninja samurai"></div>
+  <div></div>
+  <span class="samurai ninja ronin"></span>
+  <script>
+    function findClassInElement(className, type) {
+      var elems = document.getElementsByTagName(type || '*');
+      var regex = new RegExp('(^|\\s)' + className + '(\\s|$)');
+      console.log('regex', regex);
+      var results = [];
+      for (var i = 0, length = elems.length; i < length; i++) {
+        console.log('elems[i].className', elems[i].className);
+        if (regex.test(elems[i].className)) {
+          results.push(elems[i]);
+        }
+        return results;
+      }
+    }
+    //     /(^|\s)samurai(\s|$)/
+    console.log(findClassInElement('samurai', 'span').length);   
+  </script>
+</body>
+</html>
