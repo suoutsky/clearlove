@@ -9,9 +9,9 @@ async function getZhihuColumn(id) {
   await sleep(2000);
   const url = `https://zhuanlan.zhihu.com/api/columns/${id}`;
   const response = await fetch(url);
+  console.log(id);
   return await response.json();
 }
-
 const showColumnInfo = async () => {
   console.time('showColumnInfo');
   const feweekly = await getZhihuColumn('feweekly');
@@ -21,7 +21,6 @@ const showColumnInfo = async () => {
 
   console.log(`NAME: ${feweekly.name}`);
   console.log(`INTRO: ${feweekly.intro}`);
-
   console.log(`NAME: ${toolingtips.name}`);
   console.log(`INTRO: ${toolingtips.intro}`);
   console.timeEnd('showColumnInfo');
