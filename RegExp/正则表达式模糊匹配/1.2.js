@@ -14,6 +14,14 @@ console.log('贪婪', string.match(regex2));
 
 // demo3
 // 而惰性匹配，就是尽可能少的匹配:
-  var regex = /\d{2,5}?/g;
+  var regex3 = /\d{2,5}?/g;
   var string = "123 1234 12345 123456";
-  console.log('惰性', string.match(regex) );
+  console.log('惰性', string.match(regex3) );
+
+// 1.4 多选分支 
+
+// demo4
+var regex4 = /good|nice/g;
+var string = 'good idea, nice try';
+console.log(string.match(regex4));
+
